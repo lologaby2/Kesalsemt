@@ -4,7 +4,7 @@ import telebot
 import threading
 import time
 from openai import OpenAI
-from moviepy.video.io.VideoFileClip import VideoFileClip
+from moviepy.editor import VideoFileClip
 import torch
 import torchaudio
 from silero_vad import get_speech_timestamps, read_audio
@@ -20,45 +20,48 @@ os.makedirs("outputs", exist_ok=True)
 
 # مؤقت الإيقاف التلقائي
 last_activity_time = time.time()
-
 def auto_shutdown():
     while True:
         if time.time() - last_activity_time > 600:
             print("⏹️ تم إيقاف البوت تلقائيًا بعد 10 دقائق من عدم النشاط.")
             os._exit(0)
         time.sleep(30)
-
 threading.Thread(target=auto_shutdown, daemon=True).start()
 
-def random_filename():
-    return str(random.randint(1, 999)) + ".mp3"
+def random_filename(extension="mp3"):
+    return str(random.randint(1, 999)) + f".{extension}"
 
+# إزالة الصمت وتحويل إلى mp3
 def remove_silence_ai(audio_path):
     wav = read_audio(audio_path, sampling_rate=16000)
-    model = torch.hub.load(repo_or_dir='snakers4/silero-vad', model='silero_vad', force_reload=False)
+    model = torch.hub.load('snakers4/silero-vad', 'silero_vad', trust_repo=True)
     speech = get_speech_timestamps(wav, model, sampling_rate=16000)
     if not speech:
         return audio_path
     chunks = [wav[s['start']:s['end']] for s in speech]
     clean = torch.cat(chunks)
-    out_path = os.path.join("outputs", random_filename())
-    torchaudio.save(out_path, clean.unsqueeze(0), 16000)
-    return out_path
+    wav_path = os.path.join("outputs", random_filename("wav"))
+    mp3_path = wav_path.replace(".wav", ".mp3")
+    torchaudio.save(wav_path, clean.unsqueeze(0), 16000)
+    os.system(f"ffmpeg -y -i {wav_path} -codec:a libmp3lame -qscale:a 2 {mp3_path}")
+    os.remove(wav_path)
+    return mp3_path
 
+# من فيديو إلى صوت نظيف
 def video_to_clean_audio(video_path):
-    audio_path = os.path.join("outputs", "temp.mp3")
+    audio_path = os.path.join("outputs", "temp.wav")
     clip = VideoFileClip(video_path)
-    clip.audio.write_audiofile(audio_path, codec="libmp3lame")
+    clip.audio.write_audiofile(audio_path, codec="pcm_s16le")
     return remove_silence_ai(audio_path)
 
+# ترجمة النص
 def send_to_gpt(text):
     system_prompt = (
-        "قم بترجمة النص للعربي بعدد كلمات اقل من النص الاصلي و حافظ على تدفق النص بسلاسة\n"
-        "قم باستبدال اسماء الاشخاص ان وجدت ب(الرجل،المرأة،الفتاة،الطفل،الشاب......) و هكذا\n"
-        "اريد ترتيب النص العربي بهذا الشكل على سبيل المثال:\n"
-        "بعد ان ظنت أنه رجل سيء، قررت قتله، لكنها كانت مخطئة!\n"
-        "داس الرجل عن طريق الخطأ على فخ، ووجد نفسه محاصرًا...\n"
-        "(بدون أقواس)"
+        "قم بترجمة النص للعربي بعدد كلمات أقل من النص الاصلي و حافظ على تدفق النص بسلاسة\n"
+        "قم باستبدال أسماء الأشخاص إن وجدت بـ (الرجل، المرأة، الفتاة، الطفل، الشاب...)\n"
+        "رتّب الجمل على النمط التالي:\n"
+        "بعد أن ظنت أنه رجل سيء، قررت قتله، لكنها كانت مخطئة!\n"
+        "داس الرجل عن طريق الخطأ على فخ، ووجد نفسه محاصرًا..."
     )
     response = client.chat.completions.create(
         model="gpt-4",
@@ -69,6 +72,7 @@ def send_to_gpt(text):
     )
     return response.choices[0].message.content.strip()
 
+# فيديو
 @bot.message_handler(content_types=["video"])
 def handle_video(message):
     global last_activity_time
@@ -82,11 +86,17 @@ def handle_video(message):
             f.write(video_data)
         audio_path = video_to_clean_audio(video_path)
         bot.send_audio(message.chat.id, open(audio_path, "rb"))
+        os.remove(video_path)
+        os.remove(audio_path)
     except Exception as e:
-        bot.reply_to(message, f"❌ خطأ: {e}")
+        bot.send_message(message.chat.id, f"❌ خطأ: {e}")
     finally:
-        bot.delete_message(message.chat.id, msg.message_id)
+        try:
+            bot.delete_message(message.chat.id, msg.message_id)
+        except:
+            pass
 
+# صوت
 @bot.message_handler(content_types=["audio", "voice"])
 def handle_audio(message):
     global last_activity_time
@@ -96,16 +106,22 @@ def handle_audio(message):
         file_id = message.audio.file_id if message.audio else message.voice.file_id
         file_info = bot.get_file(file_id)
         audio_data = bot.download_file(file_info.file_path)
-        audio_path = "outputs/input_audio.mp3"
-        with open(audio_path, "wb") as f:
+        input_path = "outputs/input_audio.wav"
+        with open(input_path, "wb") as f:
             f.write(audio_data)
-        out_path = remove_silence_ai(audio_path)
+        out_path = remove_silence_ai(input_path)
         bot.send_audio(message.chat.id, open(out_path, "rb"))
+        os.remove(input_path)
+        os.remove(out_path)
     except Exception as e:
-        bot.reply_to(message, f"❌ خطأ: {e}")
+        bot.send_message(message.chat.id, f"❌ خطأ: {e}")
     finally:
-        bot.delete_message(message.chat.id, msg.message_id)
+        try:
+            bot.delete_message(message.chat.id, msg.message_id)
+        except:
+            pass
 
+# نص
 @bot.message_handler(content_types=["text"])
 def handle_text(message):
     global last_activity_time
@@ -114,6 +130,6 @@ def handle_text(message):
         result = send_to_gpt(message.text)
         bot.reply_to(message, result)
     except Exception as e:
-        bot.reply_to(message, f"❌ خطأ من GPT: {e}")
+        bot.send_message(message.chat.id, f"❌ خطأ من GPT: {e}")
 
 bot.polling()
