@@ -1,7 +1,6 @@
 pyTelegramBotAPI
 openai>=1.0.0
-pydub
 moviepy
-imageio-ffmpeg
-ffmpeg-python
-numpy
+torch
+torchaudio
+silero-vad
