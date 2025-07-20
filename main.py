@@ -4,9 +4,10 @@ import telebot
 import threading
 import time
 from openai import OpenAI
-from moviepy.editor import VideoFileClip
-from pydub import AudioSegment
-from pydub.silence import detect_nonsilent
+from moviepy.video.io.VideoFileClip import VideoFileClip
+import torch
+import torchaudio
+from silero_vad import VoiceActivityDetector, collect_chunks
 
 # التوكنات
 BOT_TOKEN = "8193075108:AAHCUX0hSAKY7x44zxmDZ8AsD9bR_v4QGUk"
@@ -32,21 +33,22 @@ threading.Thread(target=auto_shutdown, daemon=True).start()
 def random_filename():
     return str(random.randint(1, 999)) + ".mp3"
 
-def remove_silence(audio_path):
-    sound = AudioSegment.from_file(audio_path)
-    nonsilent_ranges = detect_nonsilent(sound, min_silence_len=200, silence_thresh=sound.dBFS - 32)
-    result = AudioSegment.empty()
-    for start, end in nonsilent_ranges:
-        result += sound[start:end]
+def remove_silence_ai(audio_path):
+    wav, sr = torchaudio.load(audio_path)
+    vad = VoiceActivityDetector(sample_rate=sr)
+    chunks = collect_chunks(vad, wav, return_seconds=False)
+    if not chunks:
+        return audio_path  # لا يوجد كلام
+    clean = torch.cat(chunks, dim=1)
     out_path = os.path.join("outputs", random_filename())
-    result.export(out_path, format="mp3")
+    torchaudio.save(out_path, clean, sample_rate=sr)
     return out_path
 
 def video_to_clean_audio(video_path):
     audio_path = os.path.join("outputs", "temp.mp3")
     clip = VideoFileClip(video_path)
     clip.audio.write_audiofile(audio_path, codec="libmp3lame")
-    return remove_silence(audio_path)
+    return remove_silence_ai(audio_path)
 
 def send_to_gpt(text):
     system_prompt = (
@@ -96,7 +98,7 @@ def handle_audio(message):
         audio_path = "outputs/input_audio.mp3"
         with open(audio_path, "wb") as f:
             f.write(audio_data)
-        out_path = remove_silence(audio_path)
+        out_path = remove_silence_ai(audio_path)
         bot.send_audio(message.chat.id, open(out_path, "rb"))
     except Exception as e:
         bot.reply_to(message, f"❌ خطأ: {e}")
