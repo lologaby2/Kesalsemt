@@ -10,7 +10,7 @@ from pydub.silence import detect_nonsilent
 
 # الإعدادات
 BOT_TOKEN = "8193075108:AAHCUX0hSAKY7x44zxmDZ8AsD9bR_v4QGUk"
-OPENAI_API_KEY = "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"
+OPENAI_API_KEY = "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"
 bot = telebot.TeleBot(BOT_TOKEN)
 openai.api_key = OPENAI_API_KEY
 
