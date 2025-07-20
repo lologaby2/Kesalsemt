@@ -3,5 +3,5 @@ openai>=1.0.0
 moviepy
 torch
 torchaudio
-silero-vad==0.0.8
+git+https://github.com/snakers4/silero-vad.git
 soundfile
