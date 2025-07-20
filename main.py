@@ -7,8 +7,7 @@ from openai import OpenAI
 from moviepy.video.io.VideoFileClip import VideoFileClip
 import torch
 import torchaudio
-from silero_vad import SileroVAD
-import soundfile as sf
+from silero_vad import VoiceActivityDetector, collect_chunks
 
 # التوكنات
 BOT_TOKEN = "8193075108:AAHCUX0hSAKY7x44zxmDZ8AsD9bR_v4QGUk"
@@ -36,13 +35,13 @@ def random_filename():
 
 def remove_silence_ai(audio_path):
     wav, sr = torchaudio.load(audio_path)
-    vad = SileroVAD(sample_rate=sr)
-    timestamps = vad(wav, return_seconds=True)
-    if not timestamps:
+    vad = VoiceActivityDetector(sample_rate=sr)
+    chunks = collect_chunks(vad, wav, return_seconds=False)
+    if not chunks:
         return audio_path
-    clean = torch.cat([wav[:, int(sr * start):int(sr * end)] for start, end in timestamps], dim=1)
+    clean = torch.cat(chunks, dim=1)
     out_path = os.path.join("outputs", random_filename())
-    sf.write(out_path, clean.squeeze().numpy(), sr)
+    torchaudio.save(out_path, clean, sr)
     return out_path
 
 def video_to_clean_audio(video_path):
