@@ -7,7 +7,6 @@ from openai import OpenAI
 from moviepy.editor import VideoFileClip
 import torch
 import torchaudio
-from silero_vad import get_speech_timestamps, read_audio
 
 # التوكنات
 BOT_TOKEN = "8193075108:AAHCUX0hSAKY7x44zxmDZ8AsD9bR_v4QGUk"
@@ -31,15 +30,24 @@ threading.Thread(target=auto_shutdown, daemon=True).start()
 def random_filename(extension="mp3"):
     return str(random.randint(1, 999)) + f".{extension}"
 
-# إزالة الصمت وتحويل إلى mp3
+# دالة قراءة الصوت (بديلة لـ silero_vad)
+def read_audio(path, sampling_rate=16000):
+    wav, sr = torchaudio.load(path)
+    if sr != sampling_rate:
+        wav = torchaudio.functional.resample(wav, sr, sampling_rate)
+    return wav[0]
+
+# إزالة الصمت وتحويل إلى mp3 باستخدام نموذج Silero
 def remove_silence_ai(audio_path):
     wav = read_audio(audio_path, sampling_rate=16000)
     model = torch.hub.load('snakers4/silero-vad', 'silero_vad', trust_repo=True)
+    from silero.utils_vad import collect_chunks
+    from silero.utils_vad import get_speech_timestamps
     speech = get_speech_timestamps(wav, model, sampling_rate=16000)
     if not speech:
         return audio_path
-    chunks = [wav[s['start']:s['end']] for s in speech]
-    clean = torch.cat(chunks)
+    from silero.utils_vad import collect_chunks
+    clean = collect_chunks(wav, speech)
     wav_path = os.path.join("outputs", random_filename("wav"))
     mp3_path = wav_path.replace(".wav", ".mp3")
     torchaudio.save(wav_path, clean.unsqueeze(0), 16000)
@@ -47,7 +55,7 @@ def remove_silence_ai(audio_path):
     os.remove(wav_path)
     return mp3_path
 
-# من فيديو إلى صوت نظيف
+# تحويل الفيديو إلى صوت ثم إزالة الصمت
 def video_to_clean_audio(video_path):
     audio_path = os.path.join("outputs", "temp.wav")
     clip = VideoFileClip(video_path)
