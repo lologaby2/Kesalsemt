@@ -9,7 +9,7 @@ from pydub import AudioSegment
 from pydub.silence import detect_nonsilent
 
 # الإعدادات
-BOT_TOKEN = "ضع توكن التليجرام هنا"
+BOT_TOKEN = "8193075108:AAHCUX0hSAKY7x44zxmDZ8AsD9bR_v4QGUk"
 OPENAI_API_KEY = "ضع مفتاح OpenAI هنا"
 bot = telebot.TeleBot(BOT_TOKEN)
 openai.api_key = OPENAI_API_KEY
