@@ -4,3 +4,4 @@ moviepy
 torch
 torchaudio
 silero-vad
+soundfile
