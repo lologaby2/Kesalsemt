@@ -1,5 +1,5 @@
+openai>=1.0.0
 pyTelegramBotAPI
-openai==0.28
-moviepy==1.0.3
+moviepy
 pydub
 ffmpeg-python
