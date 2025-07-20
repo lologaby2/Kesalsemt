@@ -1,5 +1,6 @@
-openai>=1.0.0
 pyTelegramBotAPI
-moviepy
+openai>=1.0.0
 pydub
+moviepy
+imageio-ffmpeg
 ffmpeg-python
