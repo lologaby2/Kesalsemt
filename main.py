@@ -47,7 +47,7 @@ def remove_silence_webrtc(input_path, mode):
 
     with contextlib.closing(wave.open(raw_wav, 'rb')) as wf:
         sample_rate = wf.getframerate()
-        frame_duration = 30  # ms
+        frame_duration = 10  # ms
         frame_bytes = int(sample_rate * frame_duration / 1000) * 2
         frames = []
         timestamps = []
