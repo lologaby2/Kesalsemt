@@ -2,3 +2,4 @@ pyTelegramBotAPI
 moviepy==1.0.3
 pydub
 webrtcvad
+numpy
