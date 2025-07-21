@@ -36,6 +36,7 @@ def process_audio(input_path):
 
     result = model.transcribe(wav_path, verbose=False)
     segments = result.get("segments", [])
+
     if not segments:
         mp3_output = os.path.join("outputs", random_filename())
         subprocess.run(["ffmpeg", "-y", "-i", wav_path, "-codec:a", "libmp3lame", "-q:a", "2", mp3_output],
