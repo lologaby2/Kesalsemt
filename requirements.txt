@@ -1,7 +1,7 @@
 telebot==0.0.5
 moviepy==1.0.3
 pydub==0.25.1
-whisper==1.1.10
+git+https://github.com/openai/whisper.git
 torch==2.1.2
 torchaudio==2.1.2
 numpy==1.26.4
