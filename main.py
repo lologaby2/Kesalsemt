@@ -15,7 +15,7 @@ os.makedirs("outputs", exist_ok=True)
 last_activity_time = time.time()
 model = whisper.load_model("base")
 
-# إيقاف تلقائي بعد 10 دقائق
+# إيقاف البوت تلقائيًا بعد 10 دقائق من الخمول
 def auto_shutdown():
     while True:
         if time.time() - last_activity_time > 600:
@@ -24,19 +24,9 @@ def auto_shutdown():
         time.sleep(30)
 threading.Thread(target=auto_shutdown, daemon=True).start()
 
-# حذف ملف بعد 10 دقائق
-def delete_file_later(path):
-    def delayed_delete():
-        time.sleep(600)
-        if os.path.exists(path):
-            try: os.remove(path)
-            except: pass
-    threading.Thread(target=delayed_delete, daemon=True).start()
-
 def random_filename():
     return str(random.randint(1, 999)) + ".mp3"
 
-# معالجة الملف الصوتي
 def process_audio(input_path):
     with tempfile.NamedTemporaryFile(delete=False, dir="outputs", suffix=".wav") as temp_wav:
         wav_path = temp_wav.name
@@ -50,7 +40,6 @@ def process_audio(input_path):
         mp3_output = os.path.join("outputs", random_filename())
         subprocess.run(["ffmpeg", "-y", "-i", wav_path, "-codec:a", "libmp3lame", "-q:a", "2", mp3_output],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        os.remove(wav_path)
         return mp3_output
 
     segment_paths = []
@@ -68,12 +57,6 @@ def process_audio(input_path):
     mp3_output = os.path.join("outputs", random_filename())
     subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list_path,
                     "-c:a", "libmp3lame", "-q:a", "2", mp3_output], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    os.remove(wav_path)
-    os.remove(concat_list_path)
-    for p in segment_paths:
-        try: os.remove(p)
-        except: pass
 
     return mp3_output
 
@@ -101,10 +84,6 @@ def handle_video(message):
         with open(mp3_path, "rb") as audio_file:
             bot.send_audio(message.chat.id, audio_file)
 
-        delete_file_later(video_path)
-        delete_file_later(audio_path)
-        delete_file_later(mp3_path)
-
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ خطأ: {e}")
     finally:
@@ -131,9 +110,6 @@ def handle_audio(message):
 
         with open(mp3_path, "rb") as audio_file:
             bot.send_audio(message.chat.id, audio_file)
-
-        delete_file_later(input_path)
-        delete_file_later(mp3_path)
 
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ خطأ: {e}")
