@@ -31,21 +31,21 @@ threading.Thread(target=auto_shutdown, daemon=True).start()
 def random_filename():
     return str(random.randint(1, 999)) + ".mp3"
 
-# تحويل الفيديو إلى صوت وقص الصمت
+# تحويل الفيديو إلى صوت وقص الصمت باستخدام Whisper
 def video_to_clean_audio(video_path):
     wav_path = "outputs/temp.wav"
     mp3_output = os.path.join("outputs", random_filename())
 
-    # استخراج الصوت WAV
+    # استخراج الصوت من الفيديو
     clip = VideoFileClip(video_path)
     clip.audio.write_audiofile(wav_path, codec="pcm_s16le")
 
-    # تحليل الصوت باستخدام Whisper
+    # تحليل الصوت لتحديد المقاطع غير الصامتة
     result = model.transcribe(wav_path, verbose=False)
     segments = result.get("segments", [])
 
     if not segments:
-        return wav_path  # لا توجد مقاطع
+        return wav_path  # fallback في حال لم يتم الكشف عن مقاطع
 
     segment_paths = []
     for i, seg in enumerate(segments):
@@ -58,12 +58,12 @@ def video_to_clean_audio(video_path):
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         segment_paths.append(part_path)
 
-    # إنشاء ملف قائمة المقاطع
+    # حفظ قائمة المقاطع لدمجها
     with open("outputs/segments.txt", "w") as f:
         for path in segment_paths:
             f.write(f"file '{path}'\n")
 
-    # دمج المقاطع
+    # دمج جميع المقاطع في ملف mp3 واحد
     subprocess.run([
         "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i",
         "outputs/segments.txt", "-c:a", "libmp3lame", "-q:a", "2", mp3_output
@@ -77,12 +77,13 @@ def video_to_clean_audio(video_path):
 
     return mp3_output
 
-# عند استلام فيديو
+# التعامل مع الرسائل التي تحتوي على فيديو
 @bot.message_handler(content_types=["video"])
 def handle_video(message):
     global last_activity_time
     last_activity_time = time.time()
-    msg = bot.reply_to(message, "⏳ جارٍ تحويل الفيديو...")
+    msg = bot.reply_to(message, "⏳ جارٍ تحويل الفيديو إلى صوت...")
+
     try:
         file_info = bot.get_file(message.video.file_id)
         video_data = bot.download_file(file_info.file_path)
@@ -91,10 +92,14 @@ def handle_video(message):
             f.write(video_data)
 
         audio_path = video_to_clean_audio(video_path)
-        bot.send_audio(message.chat.id, open(audio_path, "rb"))
+
+        # تأكد من أن الملف مفتوح أثناء الإرسال
+        with open(audio_path, "rb") as audio_file:
+            bot.send_audio(message.chat.id, audio_file)
 
         os.remove(video_path)
         os.remove(audio_path)
+
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ خطأ: {e}")
     finally:
