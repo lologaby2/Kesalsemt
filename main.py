@@ -30,7 +30,7 @@ threading.Thread(target=auto_shutdown, daemon=True).start()
 # حذف ملف بعد دقيقتين
 def delete_file_later(path):
     def delayed_delete():
-        time.sleep(120)
+        time.sleep(600)
         if os.path.exists(path):
             os.remove(path)
     threading.Thread(target=delayed_delete, daemon=True).start()
