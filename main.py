@@ -29,12 +29,12 @@ threading.Thread(target=auto_shutdown, daemon=True).start()
 def random_filename():
     return f"{random.randint(1, 999)}.mp3"
 
-# 🧠 إزالة الصمت
+# 🧠 إزالة الصمت بجودة ممتازة
 def remove_silence(input_path, vad_level):
     vad = webrtcvad.Vad(vad_level)
-    audio = AudioSegment.from_file(input_path).set_channels(1).set_frame_rate(16000)
+    audio = AudioSegment.from_file(input_path).set_channels(1).set_frame_rate(44100)
     samples = audio.raw_data
-    sample_rate = 16000
+    sample_rate = 44100
     frame_duration = 30
     frame_bytes = int(sample_rate * frame_duration / 1000) * 2
     segments = []
@@ -55,15 +55,18 @@ def remove_silence(input_path, vad_level):
         wf.writeframes(raw_clean)
 
     output_mp3 = os.path.join("outputs", random_filename())
-    AudioSegment.from_wav(temp_wav).export(output_mp3, format="mp3", bitrate="320k")
+    AudioSegment.from_wav(temp_wav)\
+        .set_channels(2)\
+        .set_frame_rate(44100)\
+        .export(output_mp3, format="mp3", bitrate="320k")
     os.remove(temp_wav)
     return output_mp3
 
-# 🧰 استخراج الصوت من الفيديو
+# 🧰 استخراج الصوت من الفيديو بجودة عالية
 def video_to_audio(video_path):
     clip = VideoFileClip(video_path)
     wav_path = "outputs/video_audio.wav"
-    clip.audio.write_audiofile(wav_path, codec='pcm_s16le')
+    clip.audio.write_audiofile(wav_path, codec='pcm_s16le', fps=44100, bitrate="320k")
     return wav_path
 
 # 🔘 قائمة اختيارات الحساسية
@@ -75,7 +78,7 @@ def send_vad_options(chat_id, file_path):
     user_files[chat_id] = file_path
     bot.send_message(chat_id, "اختر مستوى حساسية إزالة الصمت (1 أدق - 10 أعلى):", reply_markup=markup)
 
-# 🖲️ رد على اختيار الحساسية (بدون حذف الأزرار)
+# 🖲️ رد على اختيار الحساسية
 @bot.callback_query_handler(func=lambda call: call.data.startswith("vad_"))
 def process_callback(call):
     global last_activity_time
