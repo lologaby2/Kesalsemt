@@ -1,20 +1,23 @@
 import os
 import random
-import telebot
 import time
 import threading
-import whisper
 import subprocess
+import telebot
+import whisper
 from moviepy.editor import VideoFileClip
 
 BOT_TOKEN = "8193075108:AAHCUX0hSAKY7x44zxmDZ8AsD9bR_v4QGUk"
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# إنشاء مجلد مؤقت
 os.makedirs("outputs", exist_ok=True)
 last_activity_time = time.time()
 
+# تحميل نموذج Whisper
 model = whisper.load_model("base")
 
+# إيقاف البوت تلقائيًا بعد 10 دقائق
 def auto_shutdown():
     while True:
         if time.time() - last_activity_time > 600:
@@ -24,29 +27,30 @@ def auto_shutdown():
 
 threading.Thread(target=auto_shutdown, daemon=True).start()
 
+# اسم عشوائي للملف
 def random_filename():
     return str(random.randint(1, 999)) + ".mp3"
 
+# تحويل الفيديو إلى صوت وقص الصمت
 def video_to_clean_audio(video_path):
     wav_path = "outputs/temp.wav"
     mp3_output = os.path.join("outputs", random_filename())
 
-    # استخراج الصوت
+    # استخراج الصوت WAV
     clip = VideoFileClip(video_path)
     clip.audio.write_audiofile(wav_path, codec="pcm_s16le")
 
-    # استخدام Whisper لاكتشاف المقاطع الصوتية
+    # تحليل الصوت باستخدام Whisper
     result = model.transcribe(wav_path, verbose=False)
     segments = result.get("segments", [])
 
     if not segments:
-        return wav_path  # فشل التحليل، أرسل الملف كما هو
+        return wav_path  # لا توجد مقاطع
 
-    # إنشاء ملف نصي مؤقت لتجميع المقاطع
     segment_paths = []
     for i, seg in enumerate(segments):
-        start = seg['start']
-        end = seg['end']
+        start = seg["start"]
+        end = seg["end"]
         part_path = f"outputs/part_{i}.wav"
         subprocess.run([
             "ffmpeg", "-y", "-i", wav_path, "-ss", str(start), "-to", str(end),
@@ -54,17 +58,18 @@ def video_to_clean_audio(video_path):
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         segment_paths.append(part_path)
 
-    # دمج جميع المقاطع في ملف mp3 نهائي
+    # إنشاء ملف قائمة المقاطع
     with open("outputs/segments.txt", "w") as f:
         for path in segment_paths:
             f.write(f"file '{path}'\n")
 
+    # دمج المقاطع
     subprocess.run([
         "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i",
         "outputs/segments.txt", "-c:a", "libmp3lame", "-q:a", "2", mp3_output
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    # تنظيف الملفات
+    # تنظيف الملفات المؤقتة
     os.remove(wav_path)
     for path in segment_paths:
         os.remove(path)
@@ -72,6 +77,7 @@ def video_to_clean_audio(video_path):
 
     return mp3_output
 
+# عند استلام فيديو
 @bot.message_handler(content_types=["video"])
 def handle_video(message):
     global last_activity_time
