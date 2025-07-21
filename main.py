@@ -31,12 +31,12 @@ threading.Thread(target=auto_shutdown, daemon=True).start()
 def random_filename():
     return f"{random.randint(1, 999)}.mp3"
 
-# 🧠 إزالة الصمت باستخدام RMS أو dBFS
+# 🧠 إزالة الصمت باستخدام dBFS
 def remove_silence(input_path, silence_thresh):
     audio = AudioSegment.from_file(input_path).set_channels(1).set_frame_rate(44100)
     
-    # باستخدام dBFS لتحديد أجزاء الصوت التي تحتوي على مستويات أعلى من العتبة
-    non_silent_parts = audio.split_to_mono()[0].strip_silence(silence_thresh=silence_thresh, chunk_size=10)
+    # إزالة الصمت باستخدام threshold فقط
+    non_silent_parts = audio.split_to_mono()[0].strip_silence(silence_thresh=silence_thresh)
 
     # دمج الأجزاء المقطوعة
     cleaned_audio = sum(non_silent_parts)
