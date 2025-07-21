@@ -17,7 +17,7 @@ last_activity_time = time.time()
 # تحميل نموذج Whisper
 model = whisper.load_model("base")
 
-# إيقاف البوت تلقائيًا بعد 10 دقائق
+# إيقاف البوت تلقائيًا بعد 10 دقائق من عدم النشاط
 def auto_shutdown():
     while True:
         if time.time() - last_activity_time > 600:
@@ -27,25 +27,33 @@ def auto_shutdown():
 
 threading.Thread(target=auto_shutdown, daemon=True).start()
 
-# اسم عشوائي للملف
+# حذف ملف بعد دقيقتين
+def delete_file_later(path):
+    def delayed_delete():
+        time.sleep(120)
+        if os.path.exists(path):
+            os.remove(path)
+    threading.Thread(target=delayed_delete, daemon=True).start()
+
+# اسم عشوائي
 def random_filename():
     return str(random.randint(1, 999)) + ".mp3"
 
-# تحويل الفيديو إلى صوت وقص الصمت باستخدام Whisper
-def video_to_clean_audio(video_path):
+# معالجة الصوت عبر Whisper
+def process_audio(input_path):
     wav_path = "outputs/temp.wav"
     mp3_output = os.path.join("outputs", random_filename())
 
-    # استخراج الصوت من الفيديو
-    clip = VideoFileClip(video_path)
-    clip.audio.write_audiofile(wav_path, codec="pcm_s16le")
+    if not input_path.endswith(".wav"):
+        subprocess.run(["ffmpeg", "-y", "-i", input_path, wav_path],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        wav_path = input_path
 
-    # تحليل الصوت لتحديد المقاطع غير الصامتة
     result = model.transcribe(wav_path, verbose=False)
     segments = result.get("segments", [])
-
     if not segments:
-        return wav_path  # fallback في حال لم يتم الكشف عن مقاطع
+        return wav_path
 
     segment_paths = []
     for i, seg in enumerate(segments):
@@ -58,31 +66,28 @@ def video_to_clean_audio(video_path):
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         segment_paths.append(part_path)
 
-    # حفظ قائمة المقاطع لدمجها
     with open("outputs/segments.txt", "w") as f:
         for path in segment_paths:
             f.write(f"file '{path}'\n")
 
-    # دمج جميع المقاطع في ملف mp3 واحد
     subprocess.run([
         "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i",
         "outputs/segments.txt", "-c:a", "libmp3lame", "-q:a", "2", mp3_output
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    # تنظيف الملفات المؤقتة
-    os.remove(wav_path)
     for path in segment_paths:
         os.remove(path)
     os.remove("outputs/segments.txt")
+    os.remove(wav_path)
 
     return mp3_output
 
-# التعامل مع الرسائل التي تحتوي على فيديو
+# عند استلام فيديو
 @bot.message_handler(content_types=["video"])
 def handle_video(message):
     global last_activity_time
     last_activity_time = time.time()
-    msg = bot.reply_to(message, "⏳ جارٍ تحويل الفيديو إلى صوت...")
+    msg = bot.reply_to(message, "⏳ جارٍ تحويل الفيديو...")
 
     try:
         file_info = bot.get_file(message.video.file_id)
@@ -91,14 +96,56 @@ def handle_video(message):
         with open(video_path, "wb") as f:
             f.write(video_data)
 
-        audio_path = video_to_clean_audio(video_path)
+        clip = VideoFileClip(video_path)
+        audio_path = "outputs/extracted.wav"
+        clip.audio.write_audiofile(audio_path, codec="pcm_s16le")
 
-        # تأكد من أن الملف مفتوح أثناء الإرسال
-        with open(audio_path, "rb") as audio_file:
+        mp3_path = process_audio(audio_path)
+
+        with open(mp3_path, "rb") as audio_file:
             bot.send_audio(message.chat.id, audio_file)
 
-        os.remove(video_path)
-        os.remove(audio_path)
+        # حذف بعد دقيقتين
+        delete_file_later(video_path)
+        delete_file_later(audio_path)
+        delete_file_later(mp3_path)
+
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ خطأ: {e}")
+    finally:
+        try:
+            bot.delete_message(message.chat.id, msg.message_id)
+        except:
+            pass
+
+# عند استلام صوت
+@bot.message_handler(content_types=["audio", "voice"])
+def handle_audio(message):
+    global last_activity_time
+    last_activity_time = time.time()
+    msg = bot.reply_to(message, "⏳ جارٍ معالجة الملف الصوتي...")
+
+    try:
+        file_info = bot.get_file(
+            message.audio.file_id if message.audio else message.voice.file_id)
+        file_data = bot.download_file(file_info.file_path)
+        input_path = "outputs/input_audio.ogg"
+        with open(input_path, "wb") as f:
+            f.write(file_data)
+
+        wav_path = "outputs/input.wav"
+        subprocess.run(["ffmpeg", "-y", "-i", input_path, wav_path],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        mp3_path = process_audio(wav_path)
+
+        with open(mp3_path, "rb") as audio_file:
+            bot.send_audio(message.chat.id, audio_file)
+
+        # حذف بعد دقيقتين
+        delete_file_later(input_path)
+        delete_file_later(wav_path)
+        delete_file_later(mp3_path)
 
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ خطأ: {e}")
