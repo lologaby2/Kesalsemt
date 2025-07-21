@@ -1,122 +1,143 @@
 import os
 import random
+import wave
 import time
 import threading
-import subprocess
-import tempfile
 import telebot
-import whisper
+import webrtcvad
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviepy.editor import VideoFileClip
+from pydub import AudioSegment
 
 BOT_TOKEN = "8193075108:AAHCUX0hSAKY7x44zxmDZ8AsD9bR_v4QGUk"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 os.makedirs("outputs", exist_ok=True)
 last_activity_time = time.time()
-model = whisper.load_model("base")
+user_files = {}
 
-# إيقاف البوت تلقائيًا بعد 10 دقائق من الخمول
+# ⏱️ الإيقاف بعد 10 دقائق خمول
 def auto_shutdown():
     while True:
         if time.time() - last_activity_time > 600:
-            print("⏹️ تم إيقاف البوت تلقائيًا بعد 10 دقائق من الخمول.")
+            print("⏹️ توقف البوت تلقائيًا بعد 10 دقائق من الخمول.")
             os._exit(0)
         time.sleep(30)
 threading.Thread(target=auto_shutdown, daemon=True).start()
 
+# 🎲 اسم عشوائي
 def random_filename():
-    return str(random.randint(1, 999)) + ".mp3"
+    return f"{random.randint(1, 999)}.mp3"
 
-def process_audio(input_path):
-    with tempfile.NamedTemporaryFile(delete=False, dir="outputs", suffix=".wav") as temp_wav:
-        wav_path = temp_wav.name
+# 🧠 إزالة الصمت
+def remove_silence(input_path, vad_level):
+    vad = webrtcvad.Vad(vad_level)
+    audio = AudioSegment.from_file(input_path).set_channels(1).set_frame_rate(16000)
+    samples = audio.raw_data
+    sample_rate = 16000
+    frame_duration = 30
+    frame_bytes = int(sample_rate * frame_duration / 1000) * 2
+    segments = []
 
-    subprocess.run(["ffmpeg", "-y", "-i", input_path, wav_path],
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for i in range(0, len(samples), frame_bytes):
+        frame = samples[i:i+frame_bytes]
+        if len(frame) < frame_bytes:
+            break
+        if vad.is_speech(frame, sample_rate):
+            segments.append(frame)
 
-    result = model.transcribe(wav_path, verbose=False)
-    segments = result.get("segments", [])
+    raw_clean = b''.join(segments)
+    temp_wav = "outputs/temp_clean.wav"
+    with wave.open(temp_wav, 'wb') as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(raw_clean)
 
-    if not segments:
-        mp3_output = os.path.join("outputs", random_filename())
-        subprocess.run(["ffmpeg", "-y", "-i", wav_path, "-codec:a", "libmp3lame", "-q:a", "2", mp3_output],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return mp3_output
+    output_mp3 = os.path.join("outputs", random_filename())
+    AudioSegment.from_wav(temp_wav).export(output_mp3, format="mp3", bitrate="320k")
+    os.remove(temp_wav)
+    return output_mp3
 
-    segment_paths = []
-    for i, seg in enumerate(segments):
-        part_path = f"outputs/part_{i}.wav"
-        subprocess.run(["ffmpeg", "-y", "-i", wav_path, "-ss", str(seg["start"]), "-to", str(seg["end"]),
-                        "-c", "copy", part_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        segment_paths.append(part_path)
+# 🧰 استخراج الصوت من الفيديو
+def video_to_audio(video_path):
+    clip = VideoFileClip(video_path)
+    wav_path = "outputs/video_audio.wav"
+    clip.audio.write_audiofile(wav_path, codec='pcm_s16le')
+    return wav_path
 
-    concat_list_path = "outputs/segments.txt"
-    with open(concat_list_path, "w") as f:
-        for p in segment_paths:
-            f.write(f"file '{p}'\n")
+# 🔘 قائمة اختيارات الحساسية
+def send_vad_options(chat_id, file_path):
+    markup = InlineKeyboardMarkup()
+    buttons = [InlineKeyboardButton(str(i), callback_data=f"vad_{i}") for i in range(1, 11)]
+    markup.row(*buttons[:5])
+    markup.row(*buttons[5:])
+    user_files[chat_id] = file_path
+    bot.send_message(chat_id, "اختر مستوى حساسية إزالة الصمت (1 أدق - 10 أعلى):", reply_markup=markup)
 
-    mp3_output = os.path.join("outputs", random_filename())
-    subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list_path,
-                    "-c:a", "libmp3lame", "-q:a", "2", mp3_output], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+# 🖲️ رد على اختيار الحساسية (بدون حذف الأزرار)
+@bot.callback_query_handler(func=lambda call: call.data.startswith("vad_"))
+def process_callback(call):
+    global last_activity_time
+    last_activity_time = time.time()
+    vad_level = int(call.data.split("_")[1])
+    chat_id = call.message.chat.id
 
-    return mp3_output
+    try:
+        bot.answer_callback_query(call.id, text=f"🔧 معالجة الصوت بحساسية {vad_level}")
+        input_path = user_files.get(chat_id)
+        if not input_path:
+            bot.send_message(chat_id, "❌ لا يوجد ملف لمعالجته.")
+            return
 
-# استقبال فيديو
+        processing_msg = bot.send_message(chat_id, f"🔄 جاري المعالجة بحساسية {vad_level}...")
+        result = remove_silence(input_path, vad_level)
+
+        with open(result, "rb") as audio_file:
+            bot.send_audio(chat_id, audio_file)
+
+        os.remove(result)
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ خطأ أثناء المعالجة: {e}")
+
+# 📥 استقبال فيديو
 @bot.message_handler(content_types=["video"])
 def handle_video(message):
     global last_activity_time
     last_activity_time = time.time()
-    msg = bot.reply_to(message, "⏳ جارٍ معالجة الفيديو...")
-
+    msg = bot.reply_to(message, "📥 جارٍ تنزيل الفيديو...")
     try:
         file_info = bot.get_file(message.video.file_id)
-        video_data = bot.download_file(file_info.file_path)
-
-        with tempfile.NamedTemporaryFile(delete=False, dir="outputs", suffix=".mp4") as temp_vid:
-            video_path = temp_vid.name
-            temp_vid.write(video_data)
-
-        clip = VideoFileClip(video_path)
-        audio_path = video_path.replace(".mp4", ".wav")
-        clip.audio.write_audiofile(audio_path, codec="pcm_s16le")
-
-        mp3_path = process_audio(audio_path)
-
-        with open(mp3_path, "rb") as audio_file:
-            bot.send_audio(message.chat.id, audio_file)
-
+        data = bot.download_file(file_info.file_path)
+        path = "outputs/input_video.mp4"
+        with open(path, "wb") as f:
+            f.write(data)
+        wav_path = video_to_audio(path)
+        os.remove(path)
+        send_vad_options(message.chat.id, wav_path)
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ خطأ: {e}")
     finally:
-        try: bot.delete_message(message.chat.id, msg.message_id)
-        except: pass
+        bot.delete_message(message.chat.id, msg.message_id)
 
-# استقبال صوت
+# 📥 استقبال صوت/voice
 @bot.message_handler(content_types=["audio", "voice"])
 def handle_audio(message):
     global last_activity_time
     last_activity_time = time.time()
-    msg = bot.reply_to(message, "⏳ جارٍ معالجة الصوت...")
-
+    msg = bot.reply_to(message, "📥 جارٍ تنزيل الملف الصوتي...")
     try:
         file_id = message.audio.file_id if message.audio else message.voice.file_id
         file_info = bot.get_file(file_id)
-        file_data = bot.download_file(file_info.file_path)
-
-        with tempfile.NamedTemporaryFile(delete=False, dir="outputs", suffix=".ogg") as temp_in:
-            input_path = temp_in.name
-            temp_in.write(file_data)
-
-        mp3_path = process_audio(input_path)
-
-        with open(mp3_path, "rb") as audio_file:
-            bot.send_audio(message.chat.id, audio_file)
-
+        data = bot.download_file(file_info.file_path)
+        path = "outputs/input_audio.ogg"
+        with open(path, "wb") as f:
+            f.write(data)
+        send_vad_options(message.chat.id, path)
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ خطأ: {e}")
     finally:
-        try: bot.delete_message(message.chat.id, msg.message_id)
-        except: pass
+        bot.delete_message(message.chat.id, msg.message_id)
 
 print("✅ البوت يعمل الآن.")
-bot.polling(skip_pending=True)
+bot.polling()
