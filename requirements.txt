@@ -1,7 +1,4 @@
-telebot
-openai
-moviepy
-torch==2.0.1
-torchaudio==2.0.1
-numpy
-ffmpeg-python
+pyTelegramBotAPI==4.15.0
+moviepy==1.0.3
+pydub==0.25.1
+webrtcvad==2.0.10
