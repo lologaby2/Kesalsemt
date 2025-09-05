@@ -144,7 +144,7 @@ def process_callback(call):
 
         # أزرار للتحكم بالقص الإضافي
         markup = InlineKeyboardMarkup()
-        for ms in [100, 150, 200, 250]:
+        for ms in [100, 120, 130, 140, 150]:
             markup.add(InlineKeyboardButton(f"قص {ms}ms", callback_data=f"trim_{ms}"))
         bot.send_message(chat_id, "اختر مقدار القص الإضافي:", reply_markup=markup)
 
