@@ -5,7 +5,6 @@ import threading
 import wave
 import webrtcvad
 import contextlib
-import collections
 import subprocess
 import telebot
 from moviepy.editor import VideoFileClip
@@ -17,6 +16,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 os.makedirs("outputs", exist_ok=True)
 last_activity_time = time.time()
 user_files = {}
+user_last_segments = {}  # لحفظ نتائج القص حسب المستخدم
 
 # ⏱️ إيقاف تلقائي بعد 10 دقائق
 def auto_shutdown():
@@ -33,7 +33,7 @@ def random_filename():
     return f"{random.randint(1, 999)}.mp3"
 
 # 🧠 إزالة الصمت باستخدام webrtcvad
-def remove_silence_webrtc(input_path, mode):
+def remove_silence_webrtc(input_path, mode, extra_trim=0):
     raw_wav = "outputs/converted.wav"
     output_path = os.path.join("outputs", random_filename())
 
@@ -75,14 +75,21 @@ def remove_silence_webrtc(input_path, mode):
         speech_segments.append((start_time, len(frames) * frame_duration))
 
     if not speech_segments:
-        return None
+        return None, None
+
+    # تطبيق القص الإضافي
+    adjusted_segments = []
+    for start, end in speech_segments:
+        start = max(0, start - extra_trim)
+        end = max(0, end - extra_trim)
+        adjusted_segments.append((start, end))
 
     # إعداد فلتر FFmpeg لقص المقطع
     filter_parts = []
-    for i, (start, end) in enumerate(speech_segments):
+    for i, (start, end) in enumerate(adjusted_segments):
         filter_parts.append(f"[0:a]atrim=start={start/1000}:end={end/1000},asetpts=PTS-STARTPTS[a{i}]")
-    concat_inputs = "".join(f"[a{i}]" for i in range(len(speech_segments)))
-    filter_complex = ";".join(filter_parts) + f";{concat_inputs}concat=n={len(speech_segments)}:v=0:a=1[out]"
+    concat_inputs = "".join(f"[a{i}]" for i in range(len(adjusted_segments)))
+    filter_complex = ";".join(filter_parts) + f";{concat_inputs}concat=n={len(adjusted_segments)}:v=0:a=1[out]"
 
     cmd = [
         "ffmpeg", "-y", "-i", input_path,
@@ -91,7 +98,7 @@ def remove_silence_webrtc(input_path, mode):
     ]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    return output_path
+    return output_path, adjusted_segments
 
 # 🧰 استخراج صوت من فيديو
 def video_to_audio(video_path):
@@ -108,7 +115,7 @@ def send_vad_options(chat_id, file_path):
     user_files[chat_id] = file_path
     bot.send_message(chat_id, "اختر حساسية إزالة الصمت (0 أدق – 3 أعلى):", reply_markup=markup)
 
-# ⏺️ تنفيذ عند الضغط على زر
+# ⏺️ تنفيذ عند الضغط على زر الحساسية
 @bot.callback_query_handler(func=lambda call: call.data.startswith("vad_"))
 def process_callback(call):
     global last_activity_time
@@ -124,7 +131,42 @@ def process_callback(call):
             return
 
         bot.send_message(chat_id, f"🔄 إزالة الصمت بدقة...")
-        result = remove_silence_webrtc(input_path, vad_mode)
+        result, segments = remove_silence_webrtc(input_path, vad_mode)
+
+        if not result:
+            bot.send_message(chat_id, "❌ لم يتم العثور على كلام.")
+            return
+
+        user_last_segments[chat_id] = (input_path, vad_mode, segments)
+
+        with open(result, "rb") as audio_file:
+            bot.send_audio(chat_id, audio_file)
+
+        # أزرار للتحكم بالقص الإضافي
+        markup = InlineKeyboardMarkup()
+        for ms in [100, 150, 200, 250]:
+            markup.add(InlineKeyboardButton(f"قص {ms}ms", callback_data=f"trim_{ms}"))
+        bot.send_message(chat_id, "اختر مقدار القص الإضافي:", reply_markup=markup)
+
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ خطأ: {e}")
+
+# ⏺️ تنفيذ عند الضغط على زر القص الإضافي
+@bot.callback_query_handler(func=lambda call: call.data.startswith("trim_"))
+def process_trim(call):
+    global last_activity_time
+    last_activity_time = time.time()
+    extra_trim = int(call.data.split("_")[1])
+    chat_id = call.message.chat.id
+
+    try:
+        bot.answer_callback_query(call.id, text=f"✂️ قص إضافي {extra_trim}ms")
+        if chat_id not in user_last_segments:
+            bot.send_message(chat_id, "❌ لا يوجد ملف لمعالجته.")
+            return
+
+        input_path, vad_mode, _ = user_last_segments[chat_id]
+        result, _ = remove_silence_webrtc(input_path, vad_mode, extra_trim)
 
         if not result:
             bot.send_message(chat_id, "❌ لم يتم العثور على كلام.")
